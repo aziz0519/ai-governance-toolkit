@@ -1,0 +1,19 @@
+name: Governance Checks
+on: [pull_request]
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest
+
+      - name: Run governance tests
+        run: pytest tests/test_governance.py -v --tb=short
