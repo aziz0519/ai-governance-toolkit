@@ -1,5 +1,5 @@
 import time
-from audit_trail import AuditTrail
+from src.audit_trail.audit_trail import AuditTrail
 
 audit = AuditTrail(log_dir="./audit_logs")
 

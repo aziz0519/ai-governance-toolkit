@@ -1,5 +1,6 @@
 fairlearn
 pytest
+pytest-cov
 pandas
 numpy
 huggingface_hub

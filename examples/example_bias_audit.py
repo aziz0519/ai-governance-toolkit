@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
-from bias_detection import run_bias_audit, print_bias_report
+from src.bias_detection.bias_detection import run_bias_audit, print_bias_report
 
 np.random.seed(42)
 n_samples = 2000

@@ -1,5 +1,5 @@
 import numpy as np
-from human_in_the_loop import HumanInTheLoop
+from src.human_in_the_loop.human_in_the_loop import HumanInTheLoop
 
 hitl = HumanInTheLoop(confidence_threshold=0.85)
 

@@ -1,7 +1,7 @@
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from model_card_generator import generate_model_card, save_model_card
+from src.model_card_generator.model_card_generator import generate_model_card, save_model_card
 
 # Train a simple model
 data = load_breast_cancer()
