@@ -1,4 +1,15 @@
 .venv
 .python-version
 __pycache__/
+*.py[cod]
+*.pyo
+.Python
 .pytest_cache
+build/
+dist/
+*.egg-info/
+htmlcov/
+.coverage
+coverage.xml
+*.log
+logs/

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-governance-toolkit-human-in-the-loop"
+version = "0.1.0"
+description = "Human review workflows for model predictions"
+requires-python = ">=3.14"
+dependencies = ["ai-governance-toolkit-audit-trail==0.1.0"]
+
+[tool.setuptools]
+packages = ["human_in_the_loop"]
+
+[tool.setuptools.package-dir]
+human_in_the_loop = "."

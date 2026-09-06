@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections import deque
-from src.audit_trail.audit_trail import AuditTrail
+from audit_trail.audit_trail import AuditTrail
 
 
 @dataclass

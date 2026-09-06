@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-governance-toolkit-datasheet-generator"
+version = "0.1.0"
+description = "Dataset datasheet generation utilities"
+requires-python = ">=3.14"
+
+[tool.setuptools]
+packages = ["datasheet_generator"]
+
+[tool.setuptools.package-dir]
+datasheet_generator = "."

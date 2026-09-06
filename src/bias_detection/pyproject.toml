@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-governance-toolkit-bias-detection"
+version = "0.1.0"
+description = "Fairness and bias audits for machine learning predictions"
+requires-python = ">=3.14"
+dependencies = ["fairlearn", "numpy", "pandas", "scikit-learn"]
+
+[tool.setuptools]
+packages = ["bias_detection"]
+
+[tool.setuptools.package-dir]
+bias_detection = "."
