@@ -1,6 +1,6 @@
 # AI Governance Toolkit 
 
-### The Developer Toolkit for Implementing AI Governance to evaluate Generative and Agentic Systems
+## The Developer Toolkit for Implementing AI Governance to evaluate Generative and Agentic Systems
 
 * Audit Trail
 * Bias Detection
