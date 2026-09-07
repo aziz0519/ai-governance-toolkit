@@ -5,9 +5,9 @@ import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 
-from src.model_card_generator.model_card_generator import generate_model_card
-from src.bias_detection.bias_detection import run_bias_audit
-from src.audit_trail.audit_trail import AuditTrail
+from model_card_generator.model_card_generator import generate_model_card
+from bias_detection.bias_detection import run_bias_audit
+from audit_trail.audit_trail import AuditTrail
 
 
 # ----- Fixtures -----
