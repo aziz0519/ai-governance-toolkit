@@ -10,10 +10,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dependencies
-        run: pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest
+        run: pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest pytest-cov ./src/model_card_generator ./src/bias_detection ./src/audit_trail
 
       - name: Run governance tests
         run: pytest tests/test_governance.py -v --tb=short
