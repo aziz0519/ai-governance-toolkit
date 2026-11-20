@@ -3,7 +3,7 @@
 ## Setup / verification
 
 - Python is pinned to 3.14 (`.python-version`; both workflows use 3.14; root `requires-python = ">=3.14"`).
-- Install the tested subpackages **editable**; `pip install -e .` at the root exposes no importable modules (root `pyproject.toml` declares no packages and no dependencies):
+- Install the tested subpackages **editable**; `pip install -e .` at the root uses setuptools automatic discovery to expose the six packages under `src/` as top-level modules, but the root `pyproject.toml` declares no dependencies and does not install the subpackages' third-party dependencies:
   ```
   python -m pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest pytest-cov -e ./src/model_card_generator -e ./src/bias_detection -e ./src/audit_trail
   ```
