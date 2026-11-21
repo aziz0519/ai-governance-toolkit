@@ -7,6 +7,7 @@ name = "ai-governance-toolkit-datasheet-generator"
 version = "0.1.0"
 description = "Dataset datasheet generation utilities"
 requires-python = ">=3.14"
+dependencies = []
 
 [tool.setuptools]
 packages = ["datasheet_generator"]

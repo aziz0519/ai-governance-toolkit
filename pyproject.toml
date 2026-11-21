@@ -1,7 +1,10 @@
 [project]
 name = "ai-governance-toolkit"
 version = "0.1.0"
-description = "Add your description here"
+description = "Governance utilities for machine learning workflows"
 readme = "README.md"
 requires-python = ">=3.14"
+# Intentionally empty: the root project only groups the six subpackages under
+# src/. Install the tested subpackages editable (see AGENTS.md) to get their
+# third-party dependencies.
 dependencies = []

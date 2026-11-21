@@ -1,9 +1,24 @@
 import json
 from datetime import datetime, timezone
+
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    confusion_matrix
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
 )
+
+
+def _yaml_scalar(value: str) -> str:
+    """Return a JSON-quoted string, which is also a valid YAML scalar."""
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _md_text(value: str) -> str:
+    """Neutralize raw HTML and line breaks in a Markdown text value."""
+    text = str(value)
+    text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def generate_model_card(
@@ -28,43 +43,46 @@ def generate_model_card(
     precision = precision_score(y_test, y_pred, average="weighted", zero_division=0)
     recall = recall_score(y_test, y_pred, average="weighted", zero_division=0)
     f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-    cm = confusion_matrix(y_test, y_pred)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
+    safe_license = _yaml_scalar(_md_text(license_type))
+    safe_model_name = _yaml_scalar(_md_text(model_name))
+    safe_model_version = _yaml_scalar(_md_text(model_version))
+
     card = f"""---
-license: {license_type}
+license: {safe_license}
 language: en
 tags:
   - governance
   - model-card
-model_name: {model_name}
-model_version: {model_version}
+model_name: {safe_model_name}
+model_version: {safe_model_version}
 ---
 
-# {model_name}
+# {_md_text(model_name)}
 
-**Version**: {model_version}
+**Version**: {_md_text(model_version)}
 **Generated**: {timestamp}
-**Developer**: {developer}
+**Developer**: {_md_text(developer)}
 
 ## Model Details
 
 - **Model type**: {type(model).__name__}
 - **Framework**: scikit-learn
-- **License**: {license_type}
+- **License**: {_md_text(license_type)}
 
 ## Intended Use
 
-{intended_use}
+{_md_text(intended_use)}
 
 ## Out-of-Scope Use
 
-{out_of_scope_use}
+{_md_text(out_of_scope_use)}
 
 ## Training Data
 
-{training_data_description}
+{_md_text(training_data_description)}
 
 ## Evaluation Results
 
@@ -77,11 +95,11 @@ model_version: {model_version}
 
 ## Ethical Considerations
 
-{ethical_considerations}
+{_md_text(ethical_considerations)}
 
 ## Limitations
 
-{limitations}
+{_md_text(limitations)}
 
 ## How to Cite
 
@@ -94,6 +112,6 @@ Model card generated following the format proposed by
 
 def save_model_card(card_content: str, filepath: str = "MODEL_CARD.md") -> None:
     """Write the model card to disk."""
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(card_content)
     print(f"Model card saved to {filepath}")

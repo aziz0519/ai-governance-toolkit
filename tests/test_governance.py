@@ -1,13 +1,19 @@
 import json
+import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 import numpy as np
 import pandas as pd
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 
 from model_card_generator.model_card_generator import generate_model_card
+from datasheet_generator.datasheet_generator import generate_datasheet
 from bias_detection.bias_detection import run_bias_audit
 from audit_trail.audit_trail import MAX_RECORD_BYTES, AuditTrail, verify_chain
 from human_in_the_loop.human_in_the_loop import HumanInTheLoop
@@ -396,3 +402,128 @@ class TestHumanInTheLoop:
     def test_invalid_confidence_threshold_rejected(self):
         with pytest.raises(ValueError, match="confidence_threshold"):
             HumanInTheLoop(confidence_threshold=1.1)
+
+
+# ----- Generated Document Escaping Tests -----
+
+class TestDocumentEscaping:
+    @staticmethod
+    def _model_card(**overrides):
+        X = np.array([[0], [1], [2]])
+        y = np.array([0, 1, 0])
+        model = DummyClassifier(strategy="prior").fit(X, y)
+
+        kwargs = {
+            "model": model,
+            "model_name": "Test Model",
+            "model_version": "1.0.0",
+            "X_test": X,
+            "y_test": y,
+            "intended_use": "Testing",
+            "out_of_scope_use": "Production",
+            "training_data_description": "Synthetic",
+            "ethical_considerations": "None",
+            "limitations": "Small sample",
+        }
+        kwargs.update(overrides)
+        return generate_model_card(**kwargs)
+
+    def test_model_card_frontmatter_is_escaped(self):
+        malicious = 'evil\ninjected: true <script>alert(1)</script>'
+        card = self._model_card(
+            model_name=malicious,
+            license_type='MIT\nowner: attacker',
+        )
+        frontmatter = card.split("---", 2)[1]
+
+        assert 'model_name: "evil injected: true &lt;script&gt;' in frontmatter
+        assert 'license: "MIT owner: attacker"' in frontmatter
+        assert "\ninjected: true" not in frontmatter
+        assert "\nowner: attacker" not in frontmatter
+        assert "<script>" not in card
+
+    @staticmethod
+    def _datasheet(**overrides):
+        kwargs = {
+            "dataset_name": "Test Dataset",
+            "version": "1.0.0",
+            "description": "Synthetic data",
+            "source": "Tests",
+            "collection_method": "Generated",
+            "size": "3 rows",
+            "features": [
+                {"name": "age", "type": "int", "description": "Age in years"}
+            ],
+            "demographic_composition": "Not applicable",
+            "known_biases": "None",
+            "preprocessing_steps": ["Dropped missing values"],
+            "intended_use": "Testing",
+            "prohibited_use": "Production",
+            "retention_policy": "Delete after tests",
+            "contact": "team@example.com",
+        }
+        kwargs.update(overrides)
+        return generate_datasheet(**kwargs)
+
+    def test_datasheet_escapes_markdown_and_html(self):
+        sheet = self._datasheet(
+            dataset_name='evil\n# heading <b>bold</b>',
+            features=[{
+                "name": "income|group",
+                "type": "<script>alert(1)</script>",
+                "description": "line1\nline2",
+            }],
+            preprocessing_steps=["step <img src=x>\ncontinued"],
+        )
+
+        assert "| income\\|group |" in sheet
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in sheet
+        assert "&lt;img src=x&gt;" in sheet
+        assert "<script>" not in sheet
+        assert "<img" not in sheet
+        assert "\n# heading" not in sheet
+        assert "line1 line2" in sheet
+        assert "line1\nline2" not in sheet
+
+    def test_datasheet_requires_feature_keys(self):
+        with pytest.raises(ValueError, match="description"):
+            self._datasheet(features=[{"name": "age", "type": "int"}])
+
+
+# ----- Example Import Safety Tests -----
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "example_audit.py",
+        "example_bias_audit.py",
+        "example_hitl.py",
+        "example_usage.py",
+    ],
+)
+def test_example_import_has_no_side_effects(tmp_path, script):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "examples" / script
+    code = (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location("
+        f"'example_under_test', {str(script_path)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(repo_root), env.get("PYTHONPATH", "")]
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "MODEL_CARD.md").exists()
+    assert not (tmp_path / "audit_logs").exists()

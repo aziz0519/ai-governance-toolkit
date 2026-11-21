@@ -1,4 +1,34 @@
 from datetime import datetime, timezone
+from typing import Any
+
+
+REQUIRED_FEATURE_KEYS = ("name", "type", "description")
+
+
+def _md_text(value: str) -> str:
+    """Neutralize raw HTML and line breaks in a Markdown text value."""
+    text = str(value)
+    text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _md_cell(value: str) -> str:
+    """Escape a value for use inside a Markdown table cell."""
+    text = _md_text(value)
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _validate_features(features: list[dict[str, Any]]) -> None:
+    """Ensure every feature dict has the keys the template expects."""
+    for index, feature in enumerate(features):
+        if not isinstance(feature, dict):
+            raise ValueError(f"Feature at index {index} must be a dict")
+        missing = [key for key in REQUIRED_FEATURE_KEYS if key not in feature]
+        if missing:
+            raise ValueError(
+                f"Feature at index {index} is missing required keys: "
+                f"{', '.join(missing)}"
+            )
 
 
 def generate_datasheet(
@@ -19,28 +49,34 @@ def generate_datasheet(
 ) -> str:
     """Generate a datasheet for a dataset following Gebru et al.'s framework."""
 
+    _validate_features(features)
+
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     feature_table = "| Feature | Type | Description |\n|---------|------|-------------|\n"
-    for f in features:
-        feature_table += f"| {f['name']} | {f['type']} | {f['description']} |\n"
+    for feature in features:
+        feature_table += (
+            f"| {_md_cell(feature['name'])} "
+            f"| {_md_cell(feature['type'])} "
+            f"| {_md_cell(feature['description'])} |\n"
+        )
 
-    steps_list = "\n".join(f"- {step}" for step in preprocessing_steps)
+    steps_list = "\n".join(f"- {_md_text(step)}" for step in preprocessing_steps)
 
-    return f"""# Datasheet: {dataset_name}
+    return f"""# Datasheet: {_md_text(dataset_name)}
 
-**Version**: {version}
+**Version**: {_md_text(version)}
 **Generated**: {timestamp}
 
 ## Motivation
 
-{description}
+{_md_text(description)}
 
 ## Composition
 
-- **Total size**: {size}
-- **Source**: {source}
-- **Collection method**: {collection_method}
+- **Total size**: {_md_text(size)}
+- **Source**: {_md_text(source)}
+- **Collection method**: {_md_text(collection_method)}
 
 ### Features
 
@@ -48,11 +84,11 @@ def generate_datasheet(
 
 ### Demographic Composition
 
-{demographic_composition}
+{_md_text(demographic_composition)}
 
 ### Known Biases and Limitations
 
-{known_biases}
+{_md_text(known_biases)}
 
 ## Preprocessing
 
@@ -62,16 +98,16 @@ def generate_datasheet(
 
 ### Intended Use
 
-{intended_use}
+{_md_text(intended_use)}
 
 ### Prohibited Use
 
-{prohibited_use}
+{_md_text(prohibited_use)}
 
 ## Distribution and Maintenance
 
-- **Retention policy**: {retention_policy}
-- **Contact**: {contact}
+- **Retention policy**: {_md_text(retention_policy)}
+- **Contact**: {_md_text(contact)}
 
 ## Citation
 
