@@ -15,6 +15,7 @@ def run_bias_audit(
     sensitive_features: pd.Series,
     demographic_parity_threshold: float = 0.1,
     disparate_impact_threshold: float = 0.8,
+    equalized_odds_threshold: float = 0.15,
 ) -> dict:
     """
     Run a bias audit on model predictions.
@@ -25,7 +26,15 @@ def run_bias_audit(
     - equalized_odds_diff: difference in TPR and FPR
     - disparate_impact_ratio: selection rate ratio
     - violations: list of failed fairness checks
+    - passed: True only when no fairness checks failed
     """
+
+    if not 0 <= demographic_parity_threshold <= 1:
+        raise ValueError("demographic_parity_threshold must be between 0 and 1")
+    if not 0 < disparate_impact_threshold <= 1:
+        raise ValueError("disparate_impact_threshold must be in (0, 1]")
+    if not 0 <= equalized_odds_threshold <= 1:
+        raise ValueError("equalized_odds_threshold must be between 0 and 1")
 
     metrics = {
         "accuracy": accuracy_score,
@@ -65,6 +74,12 @@ def run_bias_audit(
         violations.append(
             f"Disparate impact ratio ({disparate_impact:.4f}) below "
             f"threshold ({disparate_impact_threshold})"
+        )
+
+    if eo_diff > equalized_odds_threshold:
+        violations.append(
+            f"Equalized odds difference ({eo_diff:.4f}) exceeds "
+            f"threshold ({equalized_odds_threshold})"
         )
 
     return {

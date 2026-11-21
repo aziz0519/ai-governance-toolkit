@@ -7,7 +7,7 @@ name = "ai-governance-toolkit-model-card-generator"
 version = "0.1.0"
 description = "Model card generation utilities"
 requires-python = ">=3.14"
-dependencies = ["scikit-learn"]
+dependencies = ["scikit-learn==1.9.0"]
 
 [tool.setuptools]
 packages = ["model_card_generator"]

@@ -1,13 +1,18 @@
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from collections import deque
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Callable
+
 from audit_trail.audit_trail import AuditTrail
+
+VALID_DECISIONS = frozenset({"approved", "rejected", "modified"})
 
 
 @dataclass
 class ReviewItem:
     """A prediction awaiting human review."""
+
     review_id: str
     request_id: str
     model_id: str
@@ -20,18 +25,28 @@ class ReviewItem:
 
 
 class HumanInTheLoop:
-    """Confidence-threshold escalation with a review queue."""
+    """Confidence-threshold escalation with a review queue.
+
+    The review queue is intentionally in-memory and is lost on restart. The
+    AuditTrail is the durable record of predictions and review decisions.
+    """
 
     def __init__(
         self,
         confidence_threshold: float = 0.85,
         audit: AuditTrail | None = None,
+        authorize_review: Callable[[str], bool] | None = None,
     ):
+        if not 0 <= confidence_threshold <= 1:
+            raise ValueError("confidence_threshold must be between 0 and 1")
+
         self.confidence_threshold = confidence_threshold
         self.review_queue: deque[ReviewItem] = deque()
         self.audit = audit or AuditTrail()
+        self.authorize_review = authorize_review
         self.reviewed: list[ReviewItem] = []
         self.total_predictions: int = 0
+        self._escalated_request_ids: set[str] = set()
 
     def evaluate(
         self,
@@ -76,6 +91,7 @@ class HumanInTheLoop:
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
             self.review_queue.append(review_item)
+            self._escalated_request_ids.add(request_id)
 
             return {
                 "action": "escalated",
@@ -106,20 +122,28 @@ class HumanInTheLoop:
         Submit a human review decision.
 
         decision: 'approved', 'rejected', or 'modified'
-        override: if decision is 'modified', the corrected prediction
+        override: required when decision is 'modified'
         """
 
-        target = None
-        for item in self.review_queue:
-            if item.review_id == review_id:
-                target = item
-                break
+        if decision not in VALID_DECISIONS:
+            raise ValueError(
+                f"Invalid decision {decision!r}; expected one of "
+                f"{sorted(VALID_DECISIONS)}"
+            )
+        if decision == "modified" and not override:
+            raise ValueError("override is required when decision is 'modified'")
 
+        target = next(
+            (item for item in self.review_queue if item.review_id == review_id),
+            None,
+        )
         if target is None:
             raise ValueError(f"Review {review_id} not found in queue")
+        if target.status != "pending":
+            raise ValueError(f"Review {review_id} has already been submitted")
 
-        target.status = decision
-        self.reviewed.append(target)
+        if self.authorize_review is not None and not self.authorize_review(reviewer_id):
+            raise PermissionError(f"Reviewer {reviewer_id!r} is not authorized")
 
         self.audit.log_human_review(
             request_id=target.request_id,
@@ -129,6 +153,8 @@ class HumanInTheLoop:
             reviewer_override=override,
             reason=reason,
         )
+        target.status = decision
+        self.reviewed.append(target)
 
         return {
             "review_id": review_id,
@@ -140,8 +166,7 @@ class HumanInTheLoop:
         """Calculate the percentage of all predictions that were escalated."""
         if self.total_predictions == 0:
             return 0.0
-        escalated_count = len(self.reviewed) + len(self.get_pending_reviews())
-        return escalated_count / self.total_predictions
+        return len(self._escalated_request_ids) / self.total_predictions
 
     def get_override_rate(self) -> float:
         """Calculate the percentage of reviewed items where humans disagreed."""

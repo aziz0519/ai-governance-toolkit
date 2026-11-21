@@ -7,6 +7,7 @@ name = "ai-governance-toolkit-audit-trail"
 version = "0.1.0"
 description = "Hash-chained audit trails for model predictions"
 requires-python = ">=3.14"
+dependencies = []
 
 [tool.setuptools]
 packages = ["audit_trail"]

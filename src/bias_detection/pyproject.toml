@@ -7,7 +7,12 @@ name = "ai-governance-toolkit-bias-detection"
 version = "0.1.0"
 description = "Fairness and bias audits for machine learning predictions"
 requires-python = ">=3.14"
-dependencies = ["fairlearn", "numpy", "pandas", "scikit-learn"]
+dependencies = [
+    "fairlearn==0.14.0",
+    "numpy==2.5.2",
+    "pandas==3.0.5",
+    "scikit-learn==1.9.0",
+]
 
 [tool.setuptools]
 packages = ["bias_detection"]
