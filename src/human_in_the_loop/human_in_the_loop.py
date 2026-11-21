@@ -145,9 +145,6 @@ class HumanInTheLoop:
         if self.authorize_review is not None and not self.authorize_review(reviewer_id):
             raise PermissionError(f"Reviewer {reviewer_id!r} is not authorized")
 
-        target.status = decision
-        self.reviewed.append(target)
-
         self.audit.log_human_review(
             request_id=target.request_id,
             reviewer_id=reviewer_id,
@@ -156,6 +153,8 @@ class HumanInTheLoop:
             reviewer_override=override,
             reason=reason,
         )
+        target.status = decision
+        self.reviewed.append(target)
 
         return {
             "review_id": review_id,

@@ -31,6 +31,9 @@ def _validate_chain_lines(lines: Iterable[str]) -> tuple[str, int]:
             continue
 
         record = json.loads(line)
+        if not isinstance(record, dict):
+            raise ValueError(f"Expected a JSON object at line {line_number}")
+
         stored_hash = record.get("hash")
         stored_previous = record.get("previous_hash")
         payload = {
@@ -65,39 +68,51 @@ def _tail_hash(handle: TextIO) -> str:
     return tail_hash
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject keys that collide when converted to JSON strings."""
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("Audit record contains duplicate JSON object keys")
+    return result
+
+
+@contextlib.contextmanager
+def _exclusive_lock(handle: TextIO) -> Iterator[None]:
+    """Lock the same file region for tail reads and appends."""
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    try:
+        yield
+    finally:
+        if os.name == "nt":
+            # Windows unlocks the region starting at the current position.
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 @contextlib.contextmanager
 def _exclusive_append(path: Path) -> Iterator[TextIO]:
     """Open a JSONL log for atomic, locked append access."""
     fd = os.open(path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
     os.close(fd)
 
-    with open(path, "a+", encoding="utf-8") as handle:
-        handle.seek(0)
-        if os.name == "nt":
-            import msvcrt
-
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-
+    with open(path, "a+", encoding="utf-8") as handle, _exclusive_lock(handle):
         try:
             handle.seek(0, os.SEEK_END)
             yield handle
         finally:
             handle.flush()
             os.fsync(handle.fileno())
-            if os.name == "nt":
-                import msvcrt
-
-                # Windows unlocks the region starting at the current position.
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 class AuditTrail:
@@ -126,12 +141,12 @@ class AuditTrail:
             return
 
         if path.exists():
-            with open(path, "r", encoding="utf-8") as handle:
+            with open(path, "r", encoding="utf-8") as handle, _exclusive_lock(handle):
                 self.previous_hash = _tail_hash(handle)
+                self._active_log_path = path
         else:
             self.previous_hash = "genesis"
-
-        self._active_log_path = path
+            self._active_log_path = path
 
     @staticmethod
     def _compute_hash(record: dict, previous_hash: str) -> str:
@@ -147,18 +162,26 @@ class AuditTrail:
         with _exclusive_append(log_path) as handle:
             # Other processes may have appended since __init__ or since our
             # last write. Re-read the tail while holding the lock.
-            self.previous_hash = _tail_hash(handle)
+            previous_hash = _tail_hash(handle)
 
-            record = dict(event)
-            record_hash = _compute_hash(record, self.previous_hash)
+            # Hash the same object that JSON readers will recover from disk.
+            record = json.loads(json.dumps(event), object_pairs_hook=_unique_object)
+            record_hash = _compute_hash(record, previous_hash)
             record["hash"] = record_hash
-            record["previous_hash"] = self.previous_hash
+            record["previous_hash"] = previous_hash
 
             line = json.dumps(record, sort_keys=True) + "\n"
             if len(line.encode("utf-8")) > MAX_RECORD_BYTES:
                 raise ValueError(
                     f"Audit record exceeds {MAX_RECORD_BYTES} bytes"
                 )
+
+            if handle.tell():
+                # Text seeks cannot address the last byte relative to EOF.
+                handle.buffer.seek(-1, os.SEEK_END)
+                if handle.buffer.read(1) != b"\n":
+                    line = "\n" + line
+                handle.seek(0, os.SEEK_END)
 
             handle.write(line)
             self.previous_hash = record_hash

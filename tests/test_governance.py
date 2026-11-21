@@ -250,6 +250,47 @@ class TestAuditTrail:
         assert len(records) == 4
         assert records[0]["previous_hash"] == "genesis"
 
+    def test_integer_keys_round_trip_across_appends_and_restart(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        audit.log_prediction("model", "1", {"nested": [{2: "two", 10: "ten"}]}, {})
+        audit.log_prediction("model", "1", {}, {})
+
+        log_file = next(tmp_path.glob("*.jsonl"))
+        assert verify_chain(str(log_file)) is True
+        reopened = AuditTrail(log_dir=str(tmp_path))
+        first, second = (json.loads(line) for line in log_file.read_text().splitlines())
+        assert first["input"] == {"nested": [{"2": "two", "10": "ten"}]}
+        assert reopened.previous_hash == second["hash"]
+
+    def test_colliding_json_keys_are_rejected(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="duplicate JSON object keys"):
+            audit.log_prediction("model", "1", {2: "two", "2": "other"}, {})
+        assert audit._get_log_path().read_bytes() == b""
+
+    @pytest.mark.parametrize("value", [None, [], 42, "record", True])
+    def test_non_object_records_are_invalid(self, tmp_path, value):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        log_file = audit._get_log_path()
+        log_file.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        assert verify_chain(str(log_file)) is False
+        with pytest.raises(ValueError, match="Expected a JSON object at line 1"):
+            AuditTrail(log_dir=str(tmp_path))
+
+    def test_append_preserves_unterminated_final_record(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        audit.log_prediction("model", "1", {}, {})
+        log_file = next(tmp_path.glob("*.jsonl"))
+        original = log_file.read_bytes().rstrip(b"\r\n")
+        log_file.write_bytes(original)
+
+        audit.log_prediction("model", "1", {}, {})
+
+        lines = log_file.read_bytes().splitlines()
+        assert len(lines) == 2
+        assert lines[0] == original
+        assert verify_chain(str(log_file)) is True
+
     def test_chain_restarts_for_new_log_file(self, tmp_path):
         audit = AuditTrail(log_dir=str(tmp_path))
         for i in range(2):
@@ -374,6 +415,24 @@ class TestHumanInTheLoop:
         assert len(hitl.reviewed) == 1
         assert hitl.get_override_rate() == 0.0
 
+    def test_failed_audit_write_leaves_review_pending(self, hitl, monkeypatch):
+        review = self._escalate(hitl)
+        review_id = review["review_id"]
+
+        def fail_logging(**kwargs):
+            raise OSError("audit write failed")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(hitl.audit, "log_human_review", fail_logging)
+            with pytest.raises(OSError, match="audit write failed"):
+                hitl.submit_review(review_id, "reviewer", "approved")
+
+        assert [item.review_id for item in hitl.get_pending_reviews()] == [review_id]
+        assert hitl.reviewed == []
+        assert hitl.submit_review(review_id, "reviewer", "approved")["decision"] == "approved"
+        with pytest.raises(ValueError, match="already been submitted"):
+            hitl.submit_review(review_id, "reviewer", "approved")
+
     def test_authorization_callback_enforced(self, tmp_path):
         hitl = HumanInTheLoop(
             audit=AuditTrail(log_dir=str(tmp_path)),
@@ -436,11 +495,29 @@ class TestDocumentEscaping:
         )
         frontmatter = card.split("---", 2)[1]
 
-        assert 'model_name: "evil injected: true &lt;script&gt;' in frontmatter
-        assert 'license: "MIT owner: attacker"' in frontmatter
+        assert "&lt;script&gt;" in card
+        assert "<" not in frontmatter
+        assert ">" not in frontmatter
         assert "\ninjected: true" not in frontmatter
         assert "\nowner: attacker" not in frontmatter
         assert "<script>" not in card
+
+    def test_model_card_frontmatter_values_round_trip(self):
+        name = "R&amp;D"
+        version = '"2"\\preview\u2028🌍'
+        license_type = "MIT\nowner: <example>"
+        card = self._model_card(
+            model_name=name, model_version=version, license_type=license_type
+        )
+        # The metadata fields use JSON-quoted YAML scalars.
+        frontmatter = dict(
+            line.split(": ", 1)
+            for line in card.split("---", 2)[1].splitlines()
+            if ": " in line
+        )
+        assert json.loads(frontmatter["model_name"]) == name
+        assert json.loads(frontmatter["model_version"]) == version
+        assert json.loads(frontmatter["license"]) == license_type
 
     @staticmethod
     def _datasheet(**overrides):

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 
 from sklearn.metrics import (
@@ -10,8 +11,14 @@ from sklearn.metrics import (
 
 
 def _yaml_scalar(value: str) -> str:
-    """Return a JSON-quoted string, which is also a valid YAML scalar."""
-    return json.dumps(str(value), ensure_ascii=False)
+    """Quote YAML metadata while keeping raw HTML delimiters out."""
+    quoted = json.dumps(str(value), ensure_ascii=False)
+    # Escape YAML line breaks and non-printable characters left raw by JSON.
+    return re.sub(
+        r"[<>&\x7f-\x9f\u2028\u2029\ud800-\udfff\ufffe\uffff]",
+        lambda match: f"\\u{ord(match[0]):04x}",
+        quoted,
+    )
 
 
 def _md_text(value: str) -> str:
@@ -46,9 +53,9 @@ def generate_model_card(
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    safe_license = _yaml_scalar(_md_text(license_type))
-    safe_model_name = _yaml_scalar(_md_text(model_name))
-    safe_model_version = _yaml_scalar(_md_text(model_version))
+    safe_license = _yaml_scalar(license_type)
+    safe_model_name = _yaml_scalar(model_name)
+    safe_model_version = _yaml_scalar(model_version)
 
     card = f"""---
 license: {safe_license}
