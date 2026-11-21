@@ -1,4 +1,6 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 import numpy as np
 import pandas as pd
@@ -7,7 +9,8 @@ from sklearn.model_selection import train_test_split
 
 from model_card_generator.model_card_generator import generate_model_card
 from bias_detection.bias_detection import run_bias_audit
-from audit_trail.audit_trail import AuditTrail
+from audit_trail.audit_trail import MAX_RECORD_BYTES, AuditTrail, verify_chain
+from human_in_the_loop.human_in_the_loop import HumanInTheLoop
 
 
 # ----- Fixtures -----
@@ -46,6 +49,11 @@ def trained_model_and_data():
     model.fit(X_train, y_train)
 
     return model, X_test, y_test, sens_test
+
+
+@pytest.fixture
+def hitl(tmp_path):
+    return HumanInTheLoop(audit=AuditTrail(log_dir=str(tmp_path)))
 
 
 # ----- Model Card Tests -----
@@ -135,6 +143,42 @@ class TestBiasDetection:
             f"{result['demographic_parity_diff']:.4f} exceeds tolerance"
         )
 
+    def test_equalized_odds_violation_fails_audit(self, trained_model_and_data):
+        model, X_test, y_test, sens_test = trained_model_and_data
+        y_pred = model.predict(X_test)
+
+        result = run_bias_audit(
+            y_true=y_test.values,
+            y_pred=y_pred,
+            sensitive_features=sens_test,
+            equalized_odds_threshold=0.0,
+        )
+
+        assert result["passed"] is False
+        assert any("Equalized odds" in violation for violation in result["violations"])
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"demographic_parity_threshold": -0.1},
+            {"demographic_parity_threshold": 1.1},
+            {"disparate_impact_threshold": 0},
+            {"disparate_impact_threshold": 1.1},
+            {"equalized_odds_threshold": -0.1},
+            {"equalized_odds_threshold": 1.1},
+        ],
+    )
+    def test_invalid_thresholds_rejected(self, trained_model_and_data, kwargs):
+        model, X_test, y_test, sens_test = trained_model_and_data
+
+        with pytest.raises(ValueError):
+            run_bias_audit(
+                y_true=y_test.values,
+                y_pred=model.predict(X_test),
+                sensitive_features=sens_test,
+                **kwargs,
+            )
+
 
 # ----- Audit Trail Tests -----
 
@@ -181,3 +225,174 @@ class TestAuditTrail:
             record = json.loads(line)
             assert record["previous_hash"] == previous_hash
             previous_hash = record["hash"]
+
+    def test_chain_resumes_after_restart(self, tmp_path):
+        for instance in range(2):
+            audit = AuditTrail(log_dir=str(tmp_path))
+            for i in range(2):
+                audit.log_prediction(
+                    model_id="test-model",
+                    model_version="0.1.0",
+                    input_data={"value": instance * 2 + i},
+                    output={"result": instance * 2 + i},
+                )
+
+        log_file = next(tmp_path.glob("*.jsonl"))
+        assert verify_chain(str(log_file)) is True
+
+        records = [json.loads(line) for line in log_file.read_text().splitlines()]
+        assert len(records) == 4
+        assert records[0]["previous_hash"] == "genesis"
+
+    def test_chain_restarts_for_new_log_file(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        for i in range(2):
+            audit.log_prediction(
+                model_id="test-model",
+                model_version="0.1.0",
+                input_data={"value": i},
+                output={"result": i},
+            )
+
+        first_log = next(tmp_path.glob("*.jsonl"))
+        second_log = tmp_path / "audit_next_day.jsonl"
+        audit._get_log_path = lambda: second_log
+
+        for i in range(2):
+            audit.log_prediction(
+                model_id="test-model",
+                model_version="0.1.0",
+                input_data={"value": i},
+                output={"result": i},
+            )
+
+        assert first_log != second_log
+        assert verify_chain(str(first_log)) is True
+        assert verify_chain(str(second_log)) is True
+
+        second_records = [
+            json.loads(line) for line in second_log.read_text().splitlines()
+        ]
+        assert second_records[0]["previous_hash"] == "genesis"
+
+    def test_verify_chain_detects_tampering(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+        for i in range(3):
+            audit.log_prediction(
+                model_id="test-model",
+                model_version="0.1.0",
+                input_data={"value": i},
+                output={"result": i},
+            )
+
+        log_file = next(tmp_path.glob("*.jsonl"))
+        lines = log_file.read_text().splitlines(keepends=True)
+        tampered = json.loads(lines[1])
+        tampered["confidence"] = 0.1
+        lines[1] = json.dumps(tampered) + "\n"
+        log_file.write_text("".join(lines))
+
+        assert verify_chain(str(log_file)) is False
+
+    def test_concurrent_writers_keep_valid_chain(self, tmp_path):
+        audits = [AuditTrail(log_dir=str(tmp_path)) for _ in range(2)]
+
+        def write(audit, offset):
+            for i in range(10):
+                audit.log_prediction(
+                    model_id="test-model",
+                    model_version="0.1.0",
+                    input_data={"value": offset + i},
+                    output={"result": offset + i},
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(write, audit, index * 10)
+                for index, audit in enumerate(audits)
+            ]
+            for future in futures:
+                future.result()
+
+        log_file = next(tmp_path.glob("*.jsonl"))
+        assert verify_chain(str(log_file)) is True
+        records = [json.loads(line) for line in log_file.read_text().splitlines()]
+        assert len(records) == 20
+
+    def test_oversized_record_rejected(self, tmp_path):
+        audit = AuditTrail(log_dir=str(tmp_path))
+
+        with pytest.raises(ValueError, match="exceeds"):
+            audit.log_prediction(
+                model_id="test-model",
+                model_version="0.1.0",
+                input_data={"blob": "x" * (MAX_RECORD_BYTES + 1)},
+                output={"result": 1},
+            )
+
+
+# ----- Human-in-the-loop Tests -----
+
+class TestHumanInTheLoop:
+    @staticmethod
+    def _escalate(hitl, confidence=0.5):
+        return hitl.evaluate(
+            model_id="test-model",
+            model_version="0.1.0",
+            input_data={"feature_a": 1.0},
+            prediction={"class": "positive"},
+            confidence=confidence,
+        )
+
+    def test_invalid_decision_rejected(self, hitl):
+        review = self._escalate(hitl)
+
+        with pytest.raises(ValueError, match="Invalid decision"):
+            hitl.submit_review(review["review_id"], "reviewer", "maybe")
+
+        assert len(hitl.get_pending_reviews()) == 1
+
+    def test_modified_requires_override(self, hitl):
+        review = self._escalate(hitl)
+
+        with pytest.raises(ValueError, match="override is required"):
+            hitl.submit_review(review["review_id"], "reviewer", "modified")
+
+    def test_duplicate_submission_rejected(self, hitl):
+        review = self._escalate(hitl)
+        hitl.submit_review(review["review_id"], "reviewer", "approved")
+
+        with pytest.raises(ValueError, match="already been submitted"):
+            hitl.submit_review(review["review_id"], "reviewer", "rejected")
+
+        assert len(hitl.reviewed) == 1
+        assert hitl.get_override_rate() == 0.0
+
+    def test_authorization_callback_enforced(self, tmp_path):
+        hitl = HumanInTheLoop(
+            audit=AuditTrail(log_dir=str(tmp_path)),
+            authorize_review=lambda reviewer_id: reviewer_id == "allowed",
+        )
+        review = self._escalate(hitl)
+
+        with pytest.raises(PermissionError, match="not authorized"):
+            hitl.submit_review(review["review_id"], "denied", "approved")
+
+        result = hitl.submit_review(review["review_id"], "allowed", "approved")
+        assert result["decision"] == "approved"
+
+    def test_escalation_rate_counts_unique_escalations(self, hitl):
+        review = self._escalate(hitl, confidence=0.5)
+        self._escalate(hitl, confidence=0.9)
+
+        assert hitl.get_escalation_rate() == 0.5
+
+        hitl.submit_review(review["review_id"], "reviewer", "approved")
+        with pytest.raises(ValueError):
+            hitl.submit_review(review["review_id"], "reviewer", "rejected")
+
+        assert hitl.get_escalation_rate() == 0.5
+
+    def test_invalid_confidence_threshold_rejected(self):
+        with pytest.raises(ValueError, match="confidence_threshold"):
+            HumanInTheLoop(confidence_threshold=1.1)

@@ -13,16 +13,21 @@ jobs:
           python-version: "3.14"
 
       - name: Install dependencies
-        run: python -m pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest pytest-cov -e ./src/model_card_generator -e ./src/bias_detection -e ./src/audit_trail
+        run: python -m pip install fairlearn scikit-learn pandas numpy huggingface_hub pytest pytest-cov -e ./src/model_card_generator -e ./src/bias_detection -e ./src/audit_trail -e ./src/human_in_the_loop
 
       - name: Verify test imports use repo sources
         run: |
           python -c "
           from pathlib import Path
-          import audit_trail, bias_detection, model_card_generator
+          import audit_trail, bias_detection, human_in_the_loop, model_card_generator
 
           src = (Path.cwd() / 'src').resolve()
-          modules = (audit_trail, bias_detection, model_card_generator)
+          modules = (
+              audit_trail,
+              bias_detection,
+              human_in_the_loop,
+              model_card_generator,
+          )
           bad = []
           for module in modules:
               path = Path(module.__file__).resolve()
